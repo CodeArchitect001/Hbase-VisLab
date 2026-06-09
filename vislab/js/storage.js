@@ -728,6 +728,191 @@ function resetReadSim() {
     });
 }
 
+// ===== BloomFilter Simulation =====
+const BIT_ARRAY_SIZE = 12;
+const HASH_FUNCTIONS = 3;
+let bloomBitArray = new Array(BIT_ARRAY_SIZE).fill(0);
+let bloomElements = [];
+
+function hash1(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash = hash & hash;
+    }
+    return Math.abs(hash) % BIT_ARRAY_SIZE;
+}
+
+function hash2(str) {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) + hash) + str.charCodeAt(i);
+        hash = hash & hash;
+    }
+    return Math.abs(hash) % BIT_ARRAY_SIZE;
+}
+
+function hash3(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = (hash * 31 + str.charCodeAt(i)) % BIT_ARRAY_SIZE;
+    }
+    return Math.abs(hash) % BIT_ARRAY_SIZE;
+}
+
+function getHashes(str) {
+    return [hash1(str), hash2(str), hash3(str)];
+}
+
+function updateBitArrayVisual() {
+    const cells = document.querySelectorAll('.bit-cell');
+    cells.forEach((cell, index) => {
+        cell.classList.remove('set', 'checking', 'matched', 'missed');
+        cell.textContent = '';
+        if (bloomBitArray[index] === 1) {
+            cell.classList.add('set');
+            cell.textContent = '1';
+        }
+    });
+}
+
+function animateBitSet(indices, callback) {
+    const cells = document.querySelectorAll('.bit-cell');
+    let delay = 0;
+
+    indices.forEach(index => {
+        setTimeout(() => {
+            const cell = cells[index];
+            cell.classList.add('checking');
+            setTimeout(() => {
+                cell.classList.remove('checking');
+                cell.classList.add('set');
+                cell.textContent = '1';
+                bloomBitArray[index] = 1;
+            }, 300);
+        }, delay);
+        delay += 400;
+    });
+
+    if (callback) {
+        setTimeout(callback, delay + 200);
+    }
+}
+
+function simulateBloomAdd() {
+    const inputValue = document.getElementById('bloomInputValue');
+    const result = document.getElementById('bloomResult');
+
+    // Generate random element
+    const userIds = ['10086', '10087', '10088', '10089', '10090'];
+    const randomId = userIds[Math.floor(Math.random() * userIds.length)];
+    const element = `user:${randomId}`;
+
+    if (bloomElements.includes(element)) {
+        result.innerHTML = `
+            <div class="result-content">
+                <p><strong>"${element}"</strong> 已在过滤器中，无需重复添加</p>
+            </div>
+        `;
+        return;
+    }
+
+    bloomElements.push(element);
+    inputValue.textContent = `"${element}"`;
+    inputValue.style.color = 'var(--accent-green)';
+
+    const hashes = getHashes(element);
+    result.innerHTML = `
+        <div class="result-content">
+            <p>正在添加 <strong>"${element}"</strong> 到布隆过滤器...</p>
+            <p style="color: var(--text-muted);">计算 3 个哈希值：${hashes.join(', ')}</p>
+        </div>
+    `;
+
+    animateBitSet(hashes, () => {
+        result.innerHTML = `
+            <div class="result-content">
+                <p><span style="color: #10b981;">&#9989;</span> <strong>"${element}"</strong> 已添加到过滤器</p>
+                <p style="color: var(--text-muted);">位数组位置 ${hashes.join(', ')} 已设置为 1</p>
+            </div>
+        `;
+        inputValue.style.color = 'var(--accent-purple)';
+    });
+}
+
+function simulateBloomCheck() {
+    const inputValue = document.getElementById('bloomInputValue');
+    const result = document.getElementById('bloomResult');
+
+    // Generate random element to check
+    const userIds = ['10086', '10087', '10088', '10089', '10090', '99999'];
+    const randomId = userIds[Math.floor(Math.random() * userIds.length)];
+    const element = `user:${randomId}`;
+
+    inputValue.textContent = `"${element}"`;
+
+    const hashes = getHashes(element);
+    const cells = document.querySelectorAll('.bit-cell');
+
+    result.innerHTML = `
+        <div class="result-content">
+            <p>正在查询 <strong>"${element}"</strong> 是否可能存在...</p>
+            <p style="color: var(--text-muted);">检查哈希位置：${hashes.join(', ')}</p>
+        </div>
+    `;
+
+    let delay = 0;
+    let allMatched = true;
+
+    hashes.forEach(index => {
+        setTimeout(() => {
+            const cell = cells[index];
+            cell.classList.add('checking');
+            setTimeout(() => {
+                cell.classList.remove('checking');
+                if (bloomBitArray[index] === 1) {
+                    cell.classList.add('matched');
+                } else {
+                    cell.classList.add('missed');
+                    allMatched = false;
+                }
+            }, 300);
+        }, delay);
+        delay += 400;
+    });
+
+    setTimeout(() => {
+        if (allMatched) {
+            const isActuallyIn = bloomElements.includes(element);
+            result.innerHTML = `
+                <div class="result-content">
+                    <p><span style="color: #f59e0b;">&#9888;</span> <strong>"${element}" 可能存在</strong></p>
+                    <p style="color: var(--text-secondary);">3 个哈希位置均为 1，需要<strong>读取 HFile 确认</strong></p>
+                    ${!isActuallyIn ? '<p style="color: #ef4444; margin-top: 8px;">&#10060; 实际不存在（误判！）</p>' : '<p style="color: #10b981; margin-top: 8px;">&#9989; 实际存在</p>'}
+                </div>
+            `;
+        } else {
+            result.innerHTML = `
+                <div class="result-content">
+                    <p><span style="color: #10b981;">&#9989;</span> <strong>"${element}" 肯定不存在</strong></p>
+                    <p style="color: var(--text-secondary);">某个哈希位置为 0，<strong>直接跳过该 HFile</strong>，无需磁盘 IO</p>
+                </div>
+            `;
+        }
+    }, delay + 200);
+}
+
+function resetBloom() {
+    bloomBitArray = new Array(BIT_ARRAY_SIZE).fill(0);
+    bloomElements = [];
+    updateBitArrayVisual();
+    document.getElementById('bloomInputValue').textContent = '"user:10086"';
+    document.getElementById('bloomInputValue').style.color = 'var(--accent-purple)';
+    document.getElementById('bloomResult').innerHTML = `
+        <div class="result-empty">点击上方按钮演示布隆过滤器的添加和查询过程</div>
+    `;
+}
+
 // ===== Initialization =====
 document.addEventListener('DOMContentLoaded', () => {
     // Select RowKey by default in KV demo
@@ -739,3 +924,4 @@ document.addEventListener('DOMContentLoaded', () => {
     // Show first HFile detail
     showHFileDetail('data');
 });
+

@@ -45,6 +45,9 @@
             <button class="tab" data-tab="cache" onclick="switchTab('cache')">
                 <span class="tab-icon">&#128163;</span> 缓存机制
             </button>
+            <button class="tab" data-tab="bloom" onclick="switchTab('bloom')">
+                <span class="tab-icon">&#128269;</span> BloomFilter
+            </button>
         </div>
 
         <!-- Tab Content: Row vs Column Store -->
@@ -991,6 +994,184 @@
                             </tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab Content: BloomFilter -->
+        <div class="tab-content" id="tab-bloom">
+            <div class="section-header">
+                <h2>BloomFilter（布隆过滤器）</h2>
+                <p>快速判断数据是否可能存在，减少不必要的磁盘 IO</p>
+            </div>
+
+            <!-- BloomFilter Principle -->
+            <div class="bloom-principle-section">
+                <h3>工作原理</h3>
+                <p>布隆过滤器使用位数组和多个哈希函数来快速判断元素是否可能存在</p>
+
+                <div class="bloom-visual">
+                    <div class="bloom-bit-array" id="bitArray">
+                        <div class="bit-array-label">位数组（Bit Array）</div>
+                        <div class="bit-cells" id="bitCells">
+                            <div class="bit-cell" data-index="0"></div>
+                            <div class="bit-cell" data-index="1"></div>
+                            <div class="bit-cell" data-index="2"></div>
+                            <div class="bit-cell" data-index="3"></div>
+                            <div class="bit-cell" data-index="4"></div>
+                            <div class="bit-cell" data-index="5"></div>
+                            <div class="bit-cell" data-index="6"></div>
+                            <div class="bit-cell" data-index="7"></div>
+                            <div class="bit-cell" data-index="8"></div>
+                            <div class="bit-cell" data-index="9"></div>
+                            <div class="bit-cell" data-index="10"></div>
+                            <div class="bit-cell" data-index="11"></div>
+                        </div>
+                        <div class="bit-indexes">
+                            <span>0</span>
+                            <span>1</span>
+                            <span>2</span>
+                            <span>3</span>
+                            <span>4</span>
+                            <span>5</span>
+                            <span>6</span>
+                            <span>7</span>
+                            <span>8</span>
+                            <span>9</span>
+                            <span>10</span>
+                            <span>11</span>
+                        </div>
+                    </div>
+
+                    <div class="bloom-hash-functions">
+                        <div class="hash-func">
+                            <div class="hash-label">Hash 1</div>
+                            <div class="hash-arrow">&#8595;</div>
+                        </div>
+                        <div class="hash-func">
+                            <div class="hash-label">Hash 2</div>
+                            <div class="hash-arrow">&#8595;</div>
+                        </div>
+                        <div class="hash-func">
+                            <div class="hash-label">Hash 3</div>
+                            <div class="hash-arrow">&#8595;</div>
+                        </div>
+                    </div>
+
+                    <div class="bloom-input">
+                        <div class="bloom-input-label">输入元素</div>
+                        <div class="bloom-input-value" id="bloomInputValue">"user:10086"</div>
+                    </div>
+                </div>
+
+                <div class="bloom-controls">
+                    <button class="btn btn-primary" onclick="simulateBloomAdd()">
+                        <span class="icon">&#10133;</span> 添加元素到过滤器
+                    </button>
+                    <button class="btn btn-primary" onclick="simulateBloomCheck()">
+                        <span class="icon">&#128269;</span> 查询元素是否存在
+                    </button>
+                    <button class="btn btn-secondary" onclick="resetBloom()">
+                        <span class="icon">&#128260;</span> 重置过滤器
+                    </button>
+                </div>
+
+                <div class="bloom-result" id="bloomResult">
+                    <div class="result-empty">点击上方按钮演示布隆过滤器的添加和查询过程</div>
+                </div>
+            </div>
+
+            <!-- BloomFilter Characteristics -->
+            <div class="bloom-char-section">
+                <h3>核心特性</h3>
+                <div class="char-cards">
+                    <div class="char-card good">
+                        <div class="char-icon">&#9989;</div>
+                        <div class="char-title">肯定不存在</div>
+                        <div class="char-desc">如果布隆过滤器判断"不存在"，那么这个元素<strong>一定不存在</strong></div>
+                        <div class="char-example">查询 "user:99999" → 不在过滤器中 → <strong>直接跳过该 HFile</strong></div>
+                    </div>
+                    <div class="char-card warning">
+                        <div class="char-icon">&#9888;</div>
+                        <div class="char-title">可能存在</div>
+                        <div class="char-desc">如果布隆过滤器判断"可能存在"，那么这个元素<strong>不一定存在</strong>（有一定误判率）</div>
+                        <div class="char-example">查询 "user:10086" → 可能在过滤器中 → <strong>需要读取 HFile 确认</strong></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BloomFilter in HFile -->
+            <div class="bloom-hfile-section">
+                <h3>BloomFilter 在 HFile 中的位置</h3>
+                <p>每个 HFile 都包含自己的布隆过滤器，读取时先检查过滤器再决定是否读取数据块</p>
+
+                <div class="hfile-bloom-layout">
+                    <div class="hfile-visual-row">
+                        <div class="hfile-part-small">
+                            <div class="hfile-part-name">Data Block</div>
+                            <div class="hfile-part-size">实际数据</div>
+                        </div>
+                        <div class="hfile-part-small">
+                            <div class="hfile-part-name">Index Block</div>
+                            <div class="hfile-part-size">索引</div>
+                        </div>
+                        <div class="hfile-part-small active">
+                            <div class="hfile-part-name">BloomFilter</div>
+                            <div class="hfile-part-size">快速过滤</div>
+                        </div>
+                        <div class="hfile-part-small">
+                            <div class="hfile-part-name">Trailer</div>
+                            <div class="hfile-part-size">文件尾</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bloom-read-flow">
+                    <div class="read-flow-title">读取时的过滤流程</div>
+                    <div class="read-flow-steps">
+                        <div class="read-flow-step">
+                            <div class="flow-step-num">1</div>
+                            <div class="flow-step-content">
+                                <div class="flow-step-title">获取目标 RowKey</div>
+                                <div class="flow-step-desc">Client 发送 Get("user:10086")</div>
+                            </div>
+                        </div>
+                        <div class="flow-arrow">&#8594;</div>
+                        <div class="read-flow-step">
+                            <div class="flow-step-num">2</div>
+                            <div class="flow-step-content">
+                                <div class="flow-step-title">检查 BloomFilter</div>
+                                <div class="flow-step-desc">用 3 个哈希函数计算位数组位置</div>
+                            </div>
+                        </div>
+                        <div class="flow-arrow">&#8594;</div>
+                        <div class="read-flow-step" id="flowStep3">
+                            <div class="flow-step-num">3</div>
+                            <div class="flow-step-content">
+                                <div class="flow-step-title" id="flowStep3Title">判断结果</div>
+                                <div class="flow-step-desc" id="flowStep3Desc">根据位数组状态决定下一步</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BloomFilter Stats -->
+            <div class="bloom-stats-section">
+                <h3>性能收益</h3>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number">99%</div>
+                        <div class="stat-desc">不存在的数据可被快速过滤</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">&lt;1%</div>
+                        <div class="stat-desc">典型误判率（可调节）</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">10x</div>
+                        <div class="stat-desc">减少无效磁盘 IO 的倍数</div>
+                    </div>
                 </div>
             </div>
         </div>
