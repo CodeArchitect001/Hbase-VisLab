@@ -42,6 +42,9 @@
             <button class="tab" data-tab="hfile" onclick="switchTab('hfile')">
                 <span class="tab-icon">&#128196;</span> HFile 结构
             </button>
+            <button class="tab" data-tab="cache" onclick="switchTab('cache')">
+                <span class="tab-icon">&#128163;</span> 缓存机制
+            </button>
         </div>
 
         <!-- Tab Content: Row vs Column Store -->
@@ -750,6 +753,244 @@
 
                 <div class="read-path-result" id="readPathResult">
                     <p>点击上方步骤查看详细过程</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab Content: Cache Mechanism -->
+        <div class="tab-content" id="tab-cache">
+            <div class="section-header">
+                <h2>HBase 缓存机制</h2>
+                <p>MemStore 与 BlockCache 协同工作，实现高效读写</p>
+            </div>
+
+            <!-- Cache Architecture Overview -->
+            㰭iv class="cache-architecture">
+                <div class="cache-title">RegionServer 内部缓存架构</div>
+                <div class="cache-layout">
+                    <div class="cache-region-server">
+                        <div class="rs-header"><span class="rs-icon">&#127758;</span> HRegionServer</div>
+                        <div class="rs-body">
+                            <div class="cache-box memstore-box" id="memstoreBox">
+                                <div class="cache-box-header">
+                                    <span class="cache-icon">&#128163;</span>
+                                    <span>MemStore</span>
+                                    <span class="cache-tag write">写缓存</span>
+                                </div>
+                                <div class="cache-box-desc">内存中的写入缓冲区</div>
+                                <div class="cache-visual memstore-visual" id="memstoreVisual">
+                                    <div class="memstore-fill" id="memstoreFill"></div>
+                                    <div class="memstore-text" id="memstoreText">已使用: 0%</div>
+                                </div>
+                                <div class="cache-detail">
+                                    <div class="detail-row"><span>作用</span><span>新写入数据先进入此处</span></div>
+                                    <div class="detail-row"><span>刷写阈值</span><span>默认 128MB</span></div>
+                                    <div class="detail-row"><span>刷写后</span><span>生成 StoreFile (HFile)</span></div>
+                                </div>
+                            </div>
+
+                            <div class="cache-box blockcache-box" id="blockcacheBox">
+                                <div class="cache-box-header">
+                                    <span class="cache-icon">&#128214;</span>
+                                    <span>BlockCache</span>
+                                    <span class="cache-tag read">读缓存</span>
+                                </div>
+                                <div class="cache-box-desc">HFile 数据块缓存</div>
+                                <div class="cache-visual blockcache-visual" id="blockcacheVisual">
+                                    <div class="blockcache-blocks" id="blockcacheBlocks">
+                                        <div class="bc-block empty"></div>
+                                        <div class="bc-block empty"></div>
+                                        <div class="bc-block empty"></div>
+                                        <div class="bc-block empty"></div>
+                                        <div class="bc-block empty"></div>
+                                        <div class="bc-block empty"></div>
+                                    </div>
+                                    <div class="blockcache-text" id="blockcacheText">缓存块: 0/6</div>
+                                </div>
+                                <div class="cache-detail">
+                                    <div class="detail-row"><span>作用</span><span>缓存热数据块，加速读</span></div>
+                                    <div class="detail-row"><span>命中时</span><span>直接从内存返回</span></div>
+                                    <div class="detail-row"><span>未命中</span><span>从 HFile 读取并缓存</span></div>
+                                㰭iv>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Write Path with MemStore -->
+            <div class="cache-write-section">
+                <h3>写入流程与 MemStore</h3>
+                <p>观察数据如何写入 MemStore，并在达到阈值后刷写到 HFile</p>
+
+                <div class="write-sim-container">
+                    <div class="write-sim-steps">
+                        <div class="write-step" id="wStep1">
+                            <div class="write-step-num">1</div>
+                            <div class="write-step-content">
+                                <div class="write-step-title">Client 发送 Put</div>
+                                <div class="write-step-desc">客户端发送写入请求</div>
+                            </div>
+                        </div>
+                        <div class="write-arrow">&#8595;</div>
+                        <div class="write-step" id="wStep2">
+                            <div class="write-step-num">2</div>
+                            <div class="write-step-content">
+                                <div class="write-step-title">写入 WAL</div>
+                                <div class="write-step-desc">先写预写日志保证可靠性</div>
+                            </div>
+                        </div>
+                        <div class="write-arrow">&#8595;</div>
+                        <div class="write-step" id="wStep3">
+                            <div class="write-step-num">3</div>
+                            <div class="write-step-content">
+                                <div class="write-step-title">写入 MemStore</div>
+                                <div class="write-step-desc">数据进入内存缓冲区</div>
+                            </div>
+                        </div>
+                        <div class="write-arrow">&#8595;</div>
+                        <div class="write-step" id="wStep4">
+                            <div class="write-step-num">4</div>
+                            <div class="write-step-content">
+                                <div class="write-step-title">MemStore Flush</div>
+                                <div class="write-step-desc">达到阈值后刷写为 HFile</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="write-sim-visual">
+                        <div class="write-memstore-panel">
+                            <div class="panel-label">MemStore 状态</div>
+                            <div class="memstore-bucket" id="memstoreBucket">
+                                <div class="bucket-fill" id="bucketFill"></div>
+                                <div class="bucket-markers">
+                                    <div class="bucket-marker" style="bottom: 33%;">33%</div>
+                                    <div class="bucket-marker" style="bottom: 66%;">66%</div>
+                                    <div class="bucket-marker threshold" style="bottom: 100%;">100% (Flush)</div>
+                                </div>
+                            </div>
+                            <div class="bucket-status" id="bucketStatus">等待写入...</div>
+                        </div>
+
+                        <div class="write-controls">
+                            <button class="btn btn-primary" onclick="simulateWrite()">
+                                <span class="icon">&#10133;</span> 模拟写入数据
+                            </button>
+                            <button class="btn btn-secondary" onclick="resetWriteSim()">
+                                <span class="icon">&#128260;</span> 重置
+                            </button>
+                        </div>
+
+                        <div class="write-hfile-panel" id="hfilePanel">
+                            <div class="panel-label">已生成的 HFile</div>
+                            <div class="hfile-list" id="hfileList"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Read Path with BlockCache -->
+            <div class="cache-read-section">
+                <h3>读取流程与 BlockCache</h3>
+                <p>观察读取时如何依次检查 MemStore、BlockCache 和 HFile</p>
+
+                <div class="read-cache-container">
+                    <div class="read-cache-layers">
+                        <div class="read-layer" id="rLayerMemstore" onclick="checkMemStore()">
+                            <div class="read-layer-header">
+                                <span class="layer-icon">&#128163;</span>
+                                <span>MemStore</span>
+                                <span class="layer-status" id="statusMemstore">未检查</span>
+                            </div>
+                            <div class="read-layer-desc">检查最新写入的数据（可能未刷写）</div>
+                        </div>
+
+                        <div class="read-arrow">&#8595;</div>
+
+                        <div class="read-layer" id="rLayerBlockCache" onclick="checkBlockCache()">
+                            <div class="read-layer-header">
+                                <span class="layer-icon">&#128214;</span>
+                                <span>BlockCache</span>
+                                <span class="layer-status" id="statusBlockCache">未检查</span>
+                            </div>
+                            <div class="read-layer-desc">检查近期读取过的数据块</div>
+                        </div>
+
+                        <div class="read-arrow">&#8595;</div>
+
+                        <div class="read-layer" id="rLayerHFile" onclick="checkHFile()">
+                            <div class="read-layer-header">
+                                <span class="layer-icon">&#128190;</span>
+                                <span>HFile (磁盘)</span>
+                                <span class="layer-status" id="statusHFile">未检查</span>
+                            </div>
+                            <div class="read-layer-desc">从磁盘读取数据并缓存到 BlockCache</div>
+                        </div>
+                    </div>
+
+                    <div class="read-cache-controls">
+                        <button class="btn btn-primary" onclick="simulateReadHit()">
+                            <span class="icon">&#9989;</span> 模拟缓存命中
+                        </button>
+                        <button class="btn btn-primary" onclick="simulateReadMiss()">
+                            <span class="icon">&#10060;</span> 模拟缓存未命中
+                        </button>
+                        <button class="btn btn-secondary" onclick="resetReadSim()">
+                            <span class="icon">&#128260;</span> 重置
+                        </button>
+                    </div>
+
+                    <div class="read-cache-result" id="readCacheResult">
+                        <div class="result-empty">点击上方按钮模拟读取过程</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cache Comparison Table -->
+            <div class="cache-compare-section">
+                <h3>MemStore vs BlockCache 对比</h3>
+                <div class="compare-table-wrapper">
+                    <table class="compare-table">
+                        <thead>
+                            <tr>
+                                <th>对比维度</th>
+                                <th>MemStore</th>
+                                <th>BlockCache</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>主要作用</strong></td>
+                                <td>写缓存 + 读缓存</td>
+                                <td>文件块缓存（读缓存）</td>
+                            </tr>
+                            <tr>
+                                <td><strong>存储内容</strong></td>
+                                <td>新写入的 KeyValue 数据</td>
+                                <td>从 HFile 读取过的 Data Block</td>
+                            </tr>
+                            <tr>
+                                <td><strong>生命周期</strong></td>
+                                <td>刷写后清空（生成 HFile）</td>
+                                <td>LRU 淘汰，长期存在</td>
+                            </tr>
+                            <tr>
+                                <td><strong>触发条件</strong></td>
+                                <td>达到阈值（默认 128MB）或时间触发</td>
+                                <td>内存不足时 LRU 淘汰</td>
+                            </tr>
+                            <tr>
+                                <td><strong>写入路径</strong></td>
+                                <td>数据写入必经之地</td>
+                                <td>不直接参与写入</td>
+                            </tr>
+                            <tr>
+                                <td><strong>读取路径</strong></td>
+                                <td>优先检查（最新数据）</td>
+                                <td>其次检查（热数据）</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>

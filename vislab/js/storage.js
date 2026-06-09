@@ -565,6 +565,169 @@ function resetQuerySim() {
     });
 }
 
+// ===== Cache Mechanism - Write Simulation =====
+let memstoreLevel = 0;
+let hfileCount = 0;
+
+function simulateWrite() {
+    const bucketFill = document.getElementById('bucketFill');
+    const bucketStatus = document.getElementById('bucketStatus');
+    const steps = document.querySelectorAll('.write-step');
+
+    // Animate steps
+    steps.forEach((step, index) => {
+        setTimeout(() => {
+            step.classList.add('active');
+            setTimeout(() => step.classList.remove('active'), 600);
+        }, index * 400);
+    });
+
+    // Increase memstore level
+    setTimeout(() => {
+        memstoreLevel += 25;
+        if (memstoreLevel > 100) memstoreLevel = 100;
+
+        bucketFill.style.height = `${memstoreLevel}%`;
+        bucketStatus.textContent = `MemStore 已使用: ${memstoreLevel}%`;
+        bucketStatus.style.color = memstoreLevel >= 100 ? '#ef4444' : 'var(--text-secondary)';
+
+        if (memstoreLevel >= 100) {
+            setTimeout(() => {
+                bucketFill.classList.add('flushing');
+                bucketFill.style.setProperty('--current-height', '100%');
+                bucketStatus.textContent = '正在 Flush 到 HFile...';
+
+                setTimeout(() => {
+                    bucketFill.classList.remove('flushing');
+                    bucketFill.style.height = '0%';
+                    memstoreLevel = 0;
+                    hfileCount++;
+
+                    const hfileList = document.getElementById('hfileList');
+                    const hfileItem = document.createElement('div');
+                    hfileItem.className = 'hfile-item';
+                    hfileItem.textContent = `StoreFile_${Date.now()}.hfile (MemStore Flush #${hfileCount})`;
+                    hfileList.appendChild(hfileItem);
+
+                    bucketStatus.textContent = 'Flush 完成，MemStore 已清空';
+                    bucketStatus.style.color = '#10b981';
+                }, 800);
+            }, 500);
+        }
+    }, 1600);
+}
+
+function resetWriteSim() {
+    memstoreLevel = 0;
+    hfileCount = 0;
+    document.getElementById('bucketFill').style.height = '0%';
+    document.getElementById('bucketStatus').textContent = '等待写入...';
+    document.getElementById('bucketStatus').style.color = 'var(--text-secondary)';
+    document.getElementById('hfileList').innerHTML = '';
+    document.querySelectorAll('.write-step').forEach(s => s.classList.remove('active'));
+}
+
+// ===== Cache Mechanism - Read Simulation =====
+let readSimData = {
+    inMemStore: true,    // First read: data is in MemStore
+    inBlockCache: false  // After first read, data goes to BlockCache
+};
+
+function simulateReadHit() {
+    resetReadSim();
+    const result = document.getElementById('readCacheResult');
+
+    // Scenario: Data is in BlockCache (2nd read)
+    const layers = [
+        { id: 'rLayerMemstore', status: 'statusMemstore', found: false, name: 'MemStore' },
+        { id: 'rLayerBlockCache', status: 'statusBlockCache', found: true, name: 'BlockCache' }
+    ];
+
+    processReadLayers(layers, result, true);
+}
+
+function simulateReadMiss() {
+    resetReadSim();
+    const result = document.getElementById('readCacheResult');
+
+    // Scenario: Data only in HFile (cold read)
+    const layers = [
+        { id: 'rLayerMemstore', status: 'statusMemstore', found: false, name: 'MemStore' },
+        { id: 'rLayerBlockCache', status: 'statusBlockCache', found: false, name: 'BlockCache' },
+        { id: 'rLayerHFile', status: 'statusHFile', found: true, name: 'HFile' }
+    ];
+
+    processReadLayers(layers, result, false);
+}
+
+function processReadLayers(layers, resultPanel, isHit) {
+    let delay = 0;
+
+    layers.forEach((layer, index) => {
+        setTimeout(() => {
+            const el = document.getElementById(layer.id);
+            const statusEl = document.getElementById(layer.status);
+
+            if (layer.found) {
+                el.classList.add('found');
+                statusEl.textContent = '命中!';
+                statusEl.className = 'layer-status hit';
+
+                // Show result
+                resultPanel.innerHTML = generateReadResult(layers, isHit);
+            } else {
+                el.classList.add('missed');
+                statusEl.textContent = '未命中';
+                statusEl.className = 'layer-status miss';
+            }
+        }, delay);
+        delay += 600;
+    });
+}
+
+function generateReadResult(layers, isHit) {
+    const foundLayer = layers.find(l => l.found);
+    const path = layers.map(l => {
+        if (l.found) {
+            return `<span style="color: #10b981; font-weight: 600;">${l.name} ✓ 命中</span>`;
+        } else {
+            return `<span style="color: #64748b;">${l.name} ✗ 未命中</span>`;
+        }
+    }).join(' → ');
+
+    const ioDesc = isHit
+        ? '数据在 BlockCache 中命中，直接从内存返回，无需磁盘 IO'
+        : '数据不在 MemStore 和 BlockCache 中，需要从 HFile 磁盘读取，读取后缓存到 BlockCache 供下次使用';
+
+    return `
+        <div class="result-content">
+            <h4 style="color: ${isHit ? '#10b981' : '#f59e0b'}; margin-bottom: 10px;">
+                ${isHit ? '缓存命中 (Cache Hit)' : '缓存未命中 (Cache Miss)'}
+            </h4>
+            <p style="margin-bottom: 10px;"><strong>查找路径：</strong> ${path}</p>
+            <p style="color: var(--text-secondary);">${ioDesc}</p>
+            ${!isHit ? '<p style="color: var(--text-secondary); margin-top: 8px;"><strong>下次读取：</strong>同一份数据将从 BlockCache 直接返回（缓存命中）</p>' : ''}
+        </div>
+    `;
+}
+
+function resetReadSim() {
+    document.getElementById('readCacheResult').innerHTML = `
+        <div class="result-empty">点击上方按钮模拟读取过程</div>
+    `;
+
+    ['rLayerMemstore', 'rLayerBlockCache', 'rLayerHFile'].forEach(id => {
+        const el = document.getElementById(id);
+        el.classList.remove('checked', 'missed', 'found');
+    });
+
+    ['statusMemstore', 'statusBlockCache', 'statusHFile'].forEach(id => {
+        const el = document.getElementById(id);
+        el.textContent = '未检查';
+        el.className = 'layer-status';
+    });
+}
+
 // ===== Initialization =====
 document.addEventListener('DOMContentLoaded', () => {
     // Select RowKey by default in KV demo
