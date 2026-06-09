@@ -458,6 +458,113 @@ function playReadStep(stepNum) {
     }
 }
 
+// ===== Row vs Column Store Query Simulation =====
+
+function simulateRowQuery() {
+    resetQuerySim();
+    const result = document.getElementById('queryResult');
+
+    // Highlight all cells in row store blocks
+    const rowBlocks = document.querySelectorAll('.row-store-blocks .data-cell');
+    rowBlocks.forEach((cell, index) => {
+        setTimeout(() => {
+            cell.classList.add('highlight');
+            setTimeout(() => cell.classList.remove('highlight'), 600);
+        }, index * 80);
+    });
+
+    setTimeout(() => {
+        result.innerHTML = `
+            <div class="result-content">
+                <h4 class="result-row">行式存储查询过程</h4>
+                <p>查询需求：读取所有用户的 <strong>Age</strong></p>
+                <p>行式存储需要读取 <strong>所有数据块</strong>，因为 Age 和 Name、City 混存在同一个块里：</p>
+                <ul style="margin: 10px 0; padding-left: 20px; color: var(--text-secondary);">
+                    <li>Block 1：读 [001, 张三, <strong>25</strong>, 北京] → 取出 25 ✓</li>
+                    <li>Block 2：读 [002, 李四, <strong>30</strong>, 上海] → 取出 30 ✓</li>
+                    <li>Block 3：读 [003, 王五, <strong>28</strong>, 广州] → 取出 28 ✓</li>
+                </ul>
+                <p><strong>问题：</strong>读 3 个块，但有效数据只占 25%（只关心 Age，却读了 Name 和 City）</p>
+                <div class="result-stats">
+                    <div class="stat-item">
+                        <span class="stat-value row-stat">3</span>
+                        <span class="stat-label">读取块数</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value row-stat">12</span>
+                        <span class="stat-label">读取字段数</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value row-stat">25%</span>
+                        <span class="stat-label">有效数据比</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }, rowBlocks.length * 80 + 300);
+}
+
+function simulateColQuery() {
+    resetQuerySim();
+    const result = document.getElementById('queryResult');
+
+    // Highlight only age cells in column store blocks
+    const ageCells = document.querySelectorAll('.col-store-blocks .col-age');
+    const idCells = document.querySelectorAll('.col-store-blocks .col-id');
+
+    idCells.forEach((cell, index) => {
+        setTimeout(() => {
+            cell.classList.add('highlight');
+            setTimeout(() => cell.classList.remove('highlight'), 400);
+        }, index * 60);
+    });
+
+    ageCells.forEach((cell, index) => {
+        setTimeout(() => {
+            cell.classList.add('highlight');
+            setTimeout(() => cell.classList.remove('highlight'), 400);
+        }, (index + idCells.length) * 60);
+    });
+
+    setTimeout(() => {
+        result.innerHTML = `
+            <div class="result-content">
+                <h4 class="result-col">列式存储查询过程</h4>
+                <p>查询需求：读取所有用户的 <strong>Age</strong></p>
+                <p>列式存储只需读取 <strong>Age 所在的列族</strong>，跳过其他列族：</p>
+                <ul style="margin: 10px 0; padding-left: 20px; color: var(--text-secondary);">
+                    <li>CF: info 块：直接定位 age 列组 → 取出 [25, 30, 28] ✓</li>
+                    <li>CF: extra 块：<strong>完全跳过</strong>（不需要 city）</li>
+                </ul>
+                <p><strong>优势：</strong>只读 1 个列族，有效数据占比 100%，无浪费 IO</p>
+                <div class="result-stats">
+                    <div class="stat-item">
+                        <span class="stat-value col-stat">1</span>
+                        <span class="stat-label">读取块数</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value col-stat">3</span>
+                        <span class="stat-label">读取字段数</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value col-stat">100%</span>
+                        <span class="stat-label">有效数据比</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }, (ageCells.length + idCells.length) * 60 + 300);
+}
+
+function resetQuerySim() {
+    document.getElementById('queryResult').innerHTML = `
+        <div class="result-empty">点击上方按钮查看查询过程对比</div>
+    `;
+    document.querySelectorAll('.data-cell').forEach(cell => {
+        cell.classList.remove('highlight');
+    });
+}
+
 // ===== Initialization =====
 document.addEventListener('DOMContentLoaded', () => {
     // Select RowKey by default in KV demo

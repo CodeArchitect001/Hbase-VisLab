@@ -24,7 +24,10 @@
 
         <!-- Navigation Tabs -->
         <div class="tabs">
-            <button class="tab active" data-tab="keyvalue" onclick="switchTab('keyvalue')">
+            <button class="tab active" data-tab="rowcol" onclick="switchTab('rowcol')">
+                <span class="tab-icon">&#128200;</span> 行式 vs 列式
+            </button>
+            <button class="tab" data-tab="keyvalue" onclick="switchTab('keyvalue')">
                 <span class="tab-icon">&#128451;</span> KeyValue 结构
             </button>
             <button class="tab" data-tab="logical" onclick="switchTab('logical')">
@@ -41,8 +44,248 @@
             </button>
         </div>
 
+        <!-- Tab Content: Row vs Column Store -->
+        <div class="tab-content active" id="tab-rowcol">
+            <div class="section-header">
+                <h2>行式存储 vs 列式存储</h2>
+                <p>理解两种存储模型的区别是掌握 HBase 存储设计的前提</p>
+            </div>
+
+            <!-- Data Layout Visualization -->
+            <div class="rowcol-layout-section">
+                <h3>数据在磁盘上的排列方式</h3>
+                <p>同样的数据，行式和列式的物理布局完全不同</p>
+
+                <div class="rowcol-demo-table">
+                    <table class="demo-data-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Age</th>
+                                <th>City</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>001</td><td>张三</td><td>25</td><td>北京</td></tr>
+                            <tr><td>002</td><td>李四</td><td>30</td><td>上海</td></tr>
+                            <tr><td>003</td><td>王五</td><td>28</td><td>广州</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="rowcol-layout-compare">
+                    <div class="layout-side">
+                        <div class="layout-title">
+                            <span class="layout-icon">&#128451;</span>
+                            行式存储（MySQL）
+                        </div>
+                        <div class="layout-desc">数据按行连续存放</div>
+                        <div class="disk-blocks row-store-blocks" id="rowStoreBlocks">
+                            <div class="disk-block">
+                                <div class="block-label">Block 1</div>
+                                <div class="block-data">
+                                    <span class="data-cell row-id">001</span>
+                                    <span class="data-cell row-name">张三</span>
+                                    <span class="data-cell row-age">25</span>
+                                    <span class="data-cell row-city">北京</span>
+                                </div>
+                            </div>
+                            <div class="disk-block">
+                                <div class="block-label">Block 2</div>
+                                <div class="block-data">
+                                    <span class="data-cell row-id">002</span>
+                                    <span class="data-cell row-name">李四</span>
+                                    <span class="data-cell row-age">30</span>
+                                    <span class="data-cell row-city">上海</span>
+                                </div>
+                            </div>
+                            <div class="disk-block">
+                                <div class="block-label">Block 3</div>
+                                <div class="block-data">
+                                    <span class="data-cell row-id">003</span>
+                                    <span class="data-cell row-name">王五</span>
+                                    <span class="data-cell row-age">28</span>
+                                    <span class="data-cell row-city">广州</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="layout-vs">VS</div>
+
+                    <div class="layout-side">
+                        <div class="layout-title">
+                            <span class="layout-icon">&#128196;</span>
+                            列式存储（HBase）
+                        </div>
+                        <div class="layout-desc">数据按列族连续存放</div>
+                        <div class="disk-blocks col-store-blocks" id="colStoreBlocks">
+                            <div class="disk-block cf-block">
+                                <div class="block-label">CF: info</div>
+                                <div class="block-data">
+                                    <div class="col-group">
+                                        <span class="col-label">RowKey</span>
+                                        <span class="data-cell col-id">001</span>
+                                        <span class="data-cell col-id">002</span>
+                                        <span class="data-cell col-id">003</span>
+                                    </div>
+                                    <div class="col-group">
+                                        <span class="col-label">name</span>
+                                        <span class="data-cell col-name">张三</span>
+                                        <span class="data-cell col-name">李四</span>
+                                        <span class="data-cell col-name">王五</span>
+                                    </div>
+                                    <div class="col-group">
+                                        <span class="col-label">age</span>
+                                        <span class="data-cell col-age">25</span>
+                                        <span class="data-cell col-age">30</span>
+                                        <span class="data-cell col-age">28</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="disk-block cf-block">
+                                <div class="block-label">CF: extra</div>
+                                <div class="block-data">
+                                    <div class="col-group">
+                                        <span class="col-label">RowKey</span>
+                                        <span class="data-cell col-id">001</span>
+                                        <span class="data-cell col-id">002</span>
+                                        <span class="data-cell col-id">003</span>
+                                    </div>
+                                    <div class="col-group">
+                                        <span class="col-label">city</span>
+                                        <span class="data-cell col-city">北京</span>
+                                        <span class="data-cell col-city">上海</span>
+                                        <span class="data-cell col-city">广州</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Query Scenario Simulation -->
+            <div class="query-sim-section">
+                <h3>查询场景模拟</h3>
+                <p>同样的查询，两种存储模型的 IO 开销差异巨大</p>
+
+                <div class="query-scenario">
+                    <div class="query-prompt">
+                        <span class="query-label">查询需求：</span>
+                        <code>SELECT Age FROM Users</code>
+                        （读取所有用户的年龄）
+                    </div>
+
+                    <div class="query-controls">
+                        <button class="btn btn-primary" onclick="simulateRowQuery()">
+                            <span class="icon">&#128451;</span> 模拟行式存储查询
+                        </button>
+                        <button class="btn btn-primary" onclick="simulateColQuery()">
+                            <span class="icon">&#128196;</span> 模拟列式存储查询
+                        </button>
+                        <button class="btn btn-secondary" onclick="resetQuerySim()">
+                            <span class="icon">&#128260;</span> 重置
+                        </button>
+                    </div>
+
+                    <div class="query-result" id="queryResult">
+                        <div class="result-empty">点击上方按钮查看查询过程对比</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Comparison Table -->
+            <div class="compare-table-section">
+                <h3>核心特性对比</h3>
+                <div class="compare-table-wrapper">
+                    <table class="compare-table">
+                        <thead>
+                            <tr>
+                                <th>对比维度</th>
+                                <th>行式存储（MySQL / Oracle）</th>
+                                <th>列式存储（HBase / ClickHouse）</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>数据布局</strong></td>
+                                <td>按行连续存放</td>
+                                <td>按列族连续存放</td>
+                            </tr>
+                            <tr>
+                                <td><strong>读整行</strong></td>
+                                <td><span class="compare-good">快</span>（一次 IO）</td>
+                                <td><span class="compare-bad">慢</span>（需合并多个列族）</td>
+                            </tr>
+                            <tr>
+                                <td><strong>读少数列</strong></td>
+                                <td><span class="compare-bad">慢</span>（需读整行再过滤）</td>
+                                <td><span class="compare-good">快</span>（只读目标列）</td>
+                            </tr>
+                            <tr>
+                                <td><strong>列的扩展</strong></td>
+                                <td>需 ALTER TABLE，锁表</td>
+                                <td>动态添加，无感知</td>
+                            </tr>
+                            <tr>
+                                <td><strong>稀疏数据</strong></td>
+                                <td>空值占存储空间</td>
+                                <td>空值不存储</td>
+                            </tr>
+                            <tr>
+                                <td><strong>压缩率</strong></td>
+                                <td>较低（数据类型混杂）</td>
+                                <td>较高（同列数据类型一致）</td>
+                            </tr>
+                            <tr>
+                                <td><strong>适用场景</strong></td>
+                                <td>OLTP（事务处理）</td>
+                                <td>OLAP（分析查询）、时序数据</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- HBase Mapping -->
+            <div class="hbase-mapping-section">
+                <h3>列式存储在 HBase 中的体现</h3>
+                <p>理解了这个映射，HBase 的存储模型就通了</p>
+
+                <div class="mapping-flow">
+                    <div class="mapping-item">
+                        <div class="mapping-concept">列式存储</div>
+                        <div class="mapping-arrow">&#8595;</div>
+                        <div class="mapping-desc">数据按列分组存储</div>
+                    </div>
+                    <div class="mapping-item">
+                        <div class="mapping-concept">HBase Column Family</div>
+                        <div class="mapping-arrow">&#8595;</div>
+                        <div class="mapping-desc">一个列族 = 一个 Store = 独立物理文件</div>
+                    </div>
+                    <div class="mapping-item">
+                        <div class="mapping-concept">HFile</div>
+                        <div class="mapping-arrow">&#8595;</div>
+                        <div class="mapping-desc">每个列族的 HFile 只包含该列族的数据</div>
+                    </div>
+                    <div class="mapping-item">
+                        <div class="mapping-concept">查询时</div>
+                        <div class="mapping-arrow">&#8595;</div>
+                        <div class="mapping-desc">只读取目标列族的 HFile，跳过无关列族</div>
+                    </div>
+                </div>
+
+                <div class="mapping-tip">
+                    <strong>为什么 HBase 建议列族数量 1-3 个？</strong>
+                    <p>每个列族是一个独立的 Store，查询时需要跨多个 Store 合并数据。列族过多会导致读放大（Read Amplification），性能下降。</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Tab Content: KeyValue Structure -->
-        <div class="tab-content active" id="tab-keyvalue">
+        <div class="tab-content" id="tab-keyvalue">
             <div class="section-header">
                 <h2>KeyValue 结构详解</h2>
                 <p>HBase 中所有数据以 KeyValue 对的形式存储，这是 HBase 存储模型的核心</p>
