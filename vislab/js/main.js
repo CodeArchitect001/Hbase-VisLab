@@ -126,6 +126,7 @@ const componentDetails = {
                     '处理 Client 发来的实际读写请求',
                     '管理多个 HRegion（数据分片）',
                     '维护 MemStore（写缓存）和 BlockCache（读缓存）',
+                    '写入数据时先写 WAL，保证数据不丢失',
                     '执行 Region 的 Flush（刷写）和 Compaction（合并）',
                     '向 HMaster 汇报心跳和负载信息'
                 ]
@@ -135,11 +136,12 @@ const componentDetails = {
                 type: 'table',
                 headers: ['组件', '说明'],
                 rows: [
+                    ['BlockCache', '读缓存，所有 Region 共享，缓存热点数据块'],
+                    ['WAL / HLog', '预写日志，写入数据先记录到 WAL 保证可靠性'],
                     ['HRegion', '数据分片单元，按 RowKey 范围划分'],
                     ['Store', '列族存储单元，每个列族对应一个 Store'],
                     ['MemStore', '内存写缓存，数据先写入此处'],
-                    ['BlockCache', '读缓存，缓存热数据'],
-                    ['WAL', '预写日志，保证数据可靠性']
+                    ['StoreFile / HFile', '磁盘数据文件，MemStore 刷写后生成']
                 ]
             },
             {
@@ -150,6 +152,82 @@ const componentDetails = {
                     ['被管理', 'HMaster（Region 分配与负载均衡）'],
                     ['直接服务', 'Client（处理读写请求）'],
                     ['底层存储', 'HDFS（持久化 StoreFile）']
+                ]
+            }
+        ]
+    },
+    blockcache: {
+        title: 'BlockCache（读缓存）',
+        subtitle: 'RegionServer 级别 - 所有 Region 共享',
+        sections: [
+            {
+                heading: '功能描述',
+                type: 'list',
+                items: [
+                    '缓存从 HFile 读取的数据块（Block），加速读操作',
+                    'RegionServer 中所有 Region 共享同一块 BlockCache',
+                    '读取数据时优先检查 BlockCache，命中则直接返回',
+                    'LRU 淘汰策略：缓存满时淘汰最久未使用的数据块'
+                ]
+            },
+            {
+                heading: '缓存层级',
+                type: 'table',
+                headers: ['层级', '说明'],
+                rows: [
+                    ['L1 BlockCache', '默认实现，使用 BucketCache 或 LRUBlockCache'],
+                    ['L2 BucketCache', '可配置为堆外内存缓存，避免 GC 压力'],
+                    ['CombinedBlockCache', '结合 L1 和 L2，DataBlock 放 L2，IndexBlock 放 L1']
+                ]
+            },
+            {
+                heading: '相关组件',
+                type: 'table',
+                headers: ['关系', '组件'],
+                rows: [
+                    ['被包含', 'HRegionServer（RegionServer 级别共享）'],
+                    ['缓存来源', 'StoreFile / HFile（读取磁盘数据时缓存）'],
+                    ['配合', 'MemStore（读取时先查 MemStore，再查 BlockCache）']
+                ]
+            }
+        ]
+    },
+    wal: {
+        title: 'WAL / HLog（预写日志）',
+        subtitle: 'RegionServer 级别 - 保证写入可靠性',
+        sections: [
+            {
+                heading: '功能描述',
+                type: 'list',
+                items: [
+                    'Write Ahead Log：写入数据前先记录日志，保证数据不丢失',
+                    'RegionServer 崩溃后，通过重放 WAL 恢复未刷写到磁盘的数据',
+                    '每个 RegionServer 维护一个 WAL（HLog），所有 Region 共享',
+                    'WAL 写入 HDFS，利用 HDFS 的多副本保证日志可靠性'
+                ]
+            },
+            {
+                heading: '写入流程',
+                type: 'table',
+                headers: ['顺序', '操作'],
+                rows: [
+                    ['1', 'Client 发送 Put 请求到 RegionServer'],
+                    ['2', '数据先写入 WAL（HLog）'],
+                    ['3', 'WAL 同步到 HDFS（默认同步策略）'],
+                    ['4', '再写入 MemStore'],
+                    ['5', '返回写入成功给 Client'],
+                    ['崩溃恢复', '重放 WAL 日志，恢复 MemStore 中的数据']
+                ]
+            },
+            {
+                heading: '相关组件',
+                type: 'table',
+                headers: ['关系', '组件'],
+                rows: [
+                    ['被包含', 'HRegionServer（RegionServer 级别共享）'],
+                    ['写入来源', 'Client 的 Put/Delete 操作'],
+                    ['存储', 'HDFS（WAL 文件存储在 HDFS 上）'],
+                    ['恢复对象', 'MemStore（崩溃后重放 WAL 恢复 MemStore 数据）']
                 ]
             }
         ]
@@ -355,6 +433,7 @@ const flowPaths = {
     write: [
         { from: 'client', to: 'zookeeper' },
         { from: 'client', to: 'regionserver' },
+        { from: 'regionserver', to: 'wal' },
         { from: 'regionserver', to: 'memstore' },
         { from: 'memstore', to: 'storefile' },
         { from: 'storefile', to: 'hdfs' }
@@ -363,7 +442,8 @@ const flowPaths = {
         { from: 'client', to: 'zookeeper' },
         { from: 'client', to: 'regionserver' },
         { from: 'regionserver', to: 'memstore' },
-        { from: 'memserver', to: 'storefile' },
+        { from: 'regionserver', to: 'blockcache' },
+        { from: 'regionserver', to: 'storefile' },
         { from: 'regionserver', to: 'client' }
     ]
 };
@@ -433,6 +513,9 @@ function drawConnections() {
 function drawInternalConnections() {
     const svg = document.getElementById('connections');
     const internalConns = [
+        { from: 'regionserver', to: 'blockcache' },
+        { from: 'regionserver', to: 'wal' },
+        { from: 'regionserver', to: 'hregion' },
         { from: 'hregion', to: 'store' },
         { from: 'store', to: 'memstore' },
         { from: 'store', to: 'storefile' }
@@ -513,12 +596,14 @@ function getRelatedComponents(componentId) {
         client: ['zookeeper', 'regionserver', 'hmaster'],
         zookeeper: ['client', 'hmaster', 'regionserver'],
         hmaster: ['zookeeper', 'regionserver', 'client'],
-        regionserver: ['client', 'hmaster', 'zookeeper', 'hdfs', 'hregion', 'store', 'memstore', 'storefile'],
+        regionserver: ['client', 'hmaster', 'zookeeper', 'hdfs', 'hregion', 'store', 'memstore', 'storefile', 'blockcache', 'wal'],
+        blockcache: ['regionserver', 'storefile'],
+        wal: ['regionserver', 'hdfs', 'memstore'],
         hregion: ['regionserver', 'store'],
         store: ['hregion', 'memstore', 'storefile'],
-        memstore: ['store', 'storefile', 'regionserver'],
-        storefile: ['store', 'memstore', 'hdfs'],
-        hdfs: ['regionserver', 'storefile']
+        memstore: ['store', 'storefile', 'regionserver', 'wal'],
+        storefile: ['store', 'memstore', 'hdfs', 'blockcache'],
+        hdfs: ['regionserver', 'storefile', 'wal']
     };
     return relationMap[componentId] || [];
 }
@@ -586,8 +671,8 @@ function playFlow(flowType) {
 
     // Highlight components in sequence
     const componentSequence = flowType === 'write'
-        ? ['client', 'zookeeper', 'regionserver', 'memstore', 'storefile', 'hdfs']
-        : ['client', 'zookeeper', 'regionserver', 'memstore', 'storefile', 'client'];
+        ? ['client', 'zookeeper', 'regionserver', 'wal', 'memstore', 'storefile', 'hdfs']
+        : ['client', 'zookeeper', 'regionserver', 'memstore', 'blockcache', 'storefile', 'client'];
 
     animateSequence(componentSequence, 0);
 
@@ -721,7 +806,7 @@ function resetView() {
 }
 
 // ===== Sub-component Click Handlers =====
-document.querySelectorAll('.sub-component, .store-item').forEach(el => {
+document.querySelectorAll('.sub-component, .store-item, .store-wrapper').forEach(el => {
     el.addEventListener('click', (e) => {
         e.stopPropagation();
         const componentId = el.getAttribute('data-component');

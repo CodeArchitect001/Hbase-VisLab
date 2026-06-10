@@ -95,9 +95,10 @@
                         </div>
                         <div class="component-desc">主节点</div>
                         <div class="component-tags">
-                            <span class="tag">元数据管理</span>
-                            <span class="tag">Region分配</span>
-                            <span class="tag">负载均衡</span>
+                            <span class="tag">BlockCache</span>
+                            <span class="tag">WAL</span>
+                            <span class="tag">Region管理</span>
+                            <span class="tag">读写处理</span>
                         </div>
                     </div>
                 </div>
@@ -111,30 +112,46 @@
                         </div>
                         <div class="component-desc">区域服务器 - 处理实际读写请求</div>
 
-                        <div class="sub-components">
-                            <div class="sub-component" id="hregion" data-component="hregion">
+                        <!-- RegionServer 直接子组件：BlockCache / WAL / HRegion -->
+                        <div class="rs-internals">
+                            <div class="rs-level1">
+                                <div class="sub-component" id="blockcache" data-component="blockcache">
+                                    <div class="sub-header">
+                                        <span class="sub-icon">&#128218;</span>
+                                        <span>BlockCache</span>
+                                    </div>
+                                    <div class="sub-desc">读缓存，所有 Region 共享</div>
+                                </div>
+                                <div class="sub-component" id="wal" data-component="wal">
+                                    <div class="sub-header">
+                                        <span class="sub-icon">&#128220;</span>
+                                        <span>WAL / HLog</span>
+                                    </div>
+                                    <div class="sub-desc">预写日志，保证数据可靠</div>
+                                </div>
+                            </div>
+
+                            <div class="sub-component rs-hregion" id="hregion" data-component="hregion">
                                 <div class="sub-header">
                                     <span class="sub-icon">&#128451;</span>
                                     <span>HRegion</span>
                                 </div>
                                 <div class="sub-desc">数据分片单元</div>
-                            </div>
 
-                            <div class="sub-component" id="store" data-component="store">
-                                <div class="sub-header">
-                                    <span class="sub-icon">&#128194;</span>
-                                    <span>Store</span>
-                                </div>
-                                <div class="sub-desc">列族存储单元</div>
-
-                                <div class="store-internals">
-                                    <div class="store-item" id="memstore" data-component="memstore">
-                                        <div class="store-item-name">MemStore</div>
-                                        <div class="store-item-desc">内存写缓存</div>
+                                <div class="store-wrapper" id="store" data-component="store">
+                                    <div class="store-header">
+                                        <span class="sub-icon">&#128194;</span>
+                                        <span>Store（列族存储单元）</span>
                                     </div>
-                                    <div class="store-item" id="storefile" data-component="storefile">
-                                        <div class="store-item-name">StoreFile / HFile</div>
-                                        <div class="store-item-desc">磁盘数据文件</div>
+                                    <div class="store-internals">
+                                        <div class="store-item" id="memstore" data-component="memstore">
+                                            <div class="store-item-name">MemStore</div>
+                                            <div class="store-item-desc">内存写缓存</div>
+                                        </div>
+                                        <div class="store-item" id="storefile" data-component="storefile">
+                                            <div class="store-item-name">StoreFile / HFile</div>
+                                            <div class="store-item-desc">磁盘数据文件</div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -181,23 +198,23 @@
             <div class="flow-steps">
                 <div class="step">
                     <div class="step-num">1</div>
-                    <div class="step-text">Client 向 ZooKeeper 获取 HMaster 地址</div>
+                    <div class="step-text">Client 向 ZooKeeper 获取目标 Region 位置</div>
                 </div>
                 <div class="step">
                     <div class="step-num">2</div>
-                    <div class="step-text">Client 向 HRegionServer 发送 Put 请求</div>
+                    <div class="step-text">Client 直接向 HRegionServer 发送 Put 请求</div>
                 </div>
                 <div class="step">
                     <div class="step-num">3</div>
-                    <div class="step-text">数据先写入 WAL（Write Ahead Log）保证可靠性</div>
+                    <div class="step-text">数据先写入 WAL / HLog（预写日志）保证可靠性</div>
                 </div>
                 <div class="step">
                     <div class="step-num">4</div>
-                    <div class="step-text">数据写入 MemStore（内存缓冲区）</div>
+                    <div class="step-text">数据写入 MemStore（内存写缓存）</div>
                 </div>
                 <div class="step">
                     <div class="step-num">5</div>
-                    <div class="step-text">MemStore 达到阈值后刷写（Flush）到 HFile</div>
+                    <div class="step-text">MemStore 达到阈值后刷写（Flush）到 StoreFile / HFile</div>
                 </div>
                 <div class="step">
                     <div class="step-num">6</div>
@@ -220,19 +237,19 @@
                 </div>
                 <div class="step">
                     <div class="step-num">3</div>
-                    <div class="step-text">先查 MemStore（最新写入的数据）</div>
+                    <div class="step-text">先查 MemStore（最新写入的数据，RowKey 内存有序）</div>
                 </div>
                 <div class="step">
                     <div class="step-num">4</div>
-                    <div class="step-text">再查 BlockCache（读缓存）</div>
+                    <div class="step-text">再查 BlockCache（读缓存，缓存热点 HFile 数据块）</div>
                 </div>
                 <div class="step">
                     <div class="step-num">5</div>
-                    <div class="step-text">若未命中，读取 HFile（磁盘文件）</div>
+                    <div class="step-text">若未命中，读取 StoreFile / HFile（磁盘文件）</div>
                 </div>
                 <div class="step">
                     <div class="step-num">6</div>
-                    <div class="step-text">结果返回给 Client</div>
+                    <div class="step-text">结果合并后返回给 Client</div>
                 </div>
             </div>
         </div>
